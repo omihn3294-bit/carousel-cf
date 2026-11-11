@@ -53,7 +53,11 @@ function json(obj, status = 200) {
 async function handleGenerate(request, env) {
   const key = env.GROQ_API_KEY;
   if (!key) {
-    return json({ error: "المفتاح GROQ_API_KEY غير موجود في إعدادات Cloudflare" }, 500);
+    return json({
+      error:
+        "المفتاح GROQ_API_KEY غير موجود. المتغيرات التي يراها الموقع حالياً: " +
+        (Object.keys(env).join(" ، ") || "لا شيء"),
+    }, 500);
   }
 
   let body = {};
