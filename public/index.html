@@ -26,7 +26,7 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Tajawal:wght@400;500;700;800&family=Cairo:wght@400;700;800&family=Almarai:wght@400;700;800&family=Playfair+Display:wght@400;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --font-ar: 'Tajawal', 'Segoe UI', system-ui, sans-serif;
@@ -250,6 +250,7 @@
   .results-bar h2 { margin: 0 0 4px; font-size: clamp(22px, 3vw, 28px); font-weight: 800; letter-spacing: -.02em; }
   .results-sub { margin: 0; color: var(--muted); font-size: 14.5px; }
 
+  .bar-actions { display: flex; gap: 10px; flex-wrap: wrap; }
   .btn-ghost {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; color: var(--ink);
@@ -370,10 +371,16 @@
         <h2 id="resultsTitle" data-i18n="resultsTitle">شرائحك جاهزة</h2>
         <p class="results-sub" data-i18n="resultsSub"></p>
       </div>
+      <div class="bar-actions">
+      <button type="button" class="btn-ghost" id="restyle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.5L20 16"/><path d="M20 20v-4h-4"/></svg>
+        <span data-i18n="restyle">تصميم آخر</span>
+      </button>
       <button type="button" class="btn-ghost" id="all">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/></svg>
         <span data-i18n="downloadAll">تحميل الكل</span>
       </button>
+      </div>
     </div>
     <p class="note" id="resultNote" hidden></p>
     <div class="slides" id="slides"></div>
@@ -410,6 +417,7 @@ const I18N = {
     resultsTitle: 'شرائحك جاهزة',
     resultsSub: 'أربع شرائح مصممة لمنتجك، جاهزة للتحميل والنشر.',
     downloadAll: 'تحميل الكل',
+    restyle: 'تصميم آخر',
     downloadSlide: 'تحميل',
     slideRoles: ['الخطاف', 'المشكلة والحل', 'الفوائد', 'الدعوة للإجراء'],
     slideAlt: 'معاينة الشريحة',
@@ -454,6 +462,7 @@ const I18N = {
     resultsTitle: 'Your slides are ready',
     resultsSub: 'Four slides designed for your product, ready to download and post.',
     downloadAll: 'Download all',
+    restyle: 'New design',
     downloadSlide: 'Download',
     slideRoles: ['Hook', 'Problem & solution', 'Benefits', 'Call to action'],
     slideAlt: 'Slide preview',
@@ -490,7 +499,9 @@ const state = {
   lang: root.lang === 'en' ? 'en' : 'ar',
   theme: root.dataset.theme === 'light' ? 'light' : 'dark',
   img: null,
-  last: null // { data, lang }
+  last: null, // { data, lang }
+  over: null,
+  design: null
 };
 
 const els = {
@@ -498,7 +509,7 @@ const els = {
   photo: $('photo'), composer: $('composer'), thumb: $('thumb'), fileName: $('fileName'),
   attachRow: $('attachRow'), removePhoto: $('removePhoto'),
   go: $('go'), msg: $('msg'), results: $('results'), slides: $('slides'),
-  note: $('resultNote'), all: $('all'), themeBtn: $('themeBtn')
+  note: $('resultNote'), all: $('all'), restyle: $('restyle'), themeBtn: $('themeBtn')
 };
 
 const dict = () => I18N[state.lang];
@@ -668,7 +679,7 @@ async function generate() {
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description, lang: state.lang })
+      body: JSON.stringify({ description, lang: state.lang, avoid: readLast() })
     });
 
     let data = null;
@@ -685,8 +696,10 @@ async function generate() {
     }
 
     state.last = { data, lang: state.lang };
-    await ensureFonts(state.lang);
+    state.over = null;
+    await ensureFonts(state.lang, FONTKEYS.includes(data.font) ? data.font : 'a');
     render();
+    saveLast();
     setStatus('');
     els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
@@ -704,102 +717,137 @@ els.desc.addEventListener('keydown', (e) => {
   if (submit) { e.preventDefault(); generate(); }
 });
 
-async function ensureFonts(lang) {
+async function ensureFonts(lang, key) {
   if (!document.fonts || !document.fonts.load) return;
-  const fam = lang === 'ar' ? 'Tajawal' : 'Inter';
+  const fam = FONTS[lang][key] || FONTS[lang].a;
   try {
     await Promise.all([
-      document.fonts.load("800 80px '" + fam + "'"),
-      document.fonts.load("400 40px '" + fam + "'")
+      document.fonts.load('800 80px ' + fam),
+      document.fonts.load('400 40px ' + fam),
+      document.fonts.load("800 80px 'Inter'")
     ]);
     await document.fonts.ready;
   } catch (e) {}
 }
 
 /* ============================================================
-   7) قوالب الرسم
+   7) هوية التصميم: تخطيطات وخطوط وألوان
    ============================================================ */
 const SIZE = 1080;
-const CANVAS_FONT = {
-  ar: "'Tajawal', Arial, sans-serif",
-  en: "'Inter', Arial, sans-serif"
-};
+const LAYOUT_NAMES = ['editorial', 'panel', 'minimal', 'corners', 'ripple', 'band', 'grid', 'rounded'];
+const SHAPES = ['rounded', 'arch', 'circle', 'plain'];
+const FONTKEYS = ['a', 'b', 'c'];
 
-// ألوان هادئة ومريحة للعين، والذكاء الاصطناعي يختار منها
-const THEMES = {
-  ivory:  { bg: '#F4EFE6', bg2: '#EAE3D5', text: '#2A2926', accent: '#7A5C3E' },
-  sage:   { bg: '#E3E9E0', bg2: '#D5DFD2', text: '#22302A', accent: '#3E6B52' },
-  rose:   { bg: '#F5E8E6', bg2: '#EBD7D4', text: '#3A2A2E', accent: '#9A4A5C' },
-  navy:   { bg: '#1C2B40', bg2: '#16233A', text: '#EDF0F4', accent: '#C9A96B' },
-  forest: { bg: '#1F3B33', bg2: '#183029', text: '#F1EEE6', accent: '#D8BA7C' },
-  slate:  { bg: '#2C3037', bg2: '#23272D', text: '#ECEDEF', accent: '#86BBA6' }
+// a: عصري، b: كلاسيكي أنيق، c: هندسي
+const FONTS = {
+  ar: { a: "'Tajawal'", b: "'Cairo'", c: "'Almarai'" },
+  en: { a: "'Inter'", b: "'Playfair Display'", c: "'Space Grotesk'" }
 };
+const fontStack = (lang, key) => (FONTS[lang][key] || FONTS[lang].a) + ', Arial, sans-serif';
 
-// align: c = في الوسط، s = إلى الجانب | v: c = وسط، b = أسفل
+// align: c وسط، s جانب | edge: بعد النص عن الحافة | w: عرض النص | st/sb: حدود علوية وسفلية
 const LAYOUTS = {
-  frame:     { align: 'c', v: 'c', st: 130, sb: 150 },
-  editorial: { align: 's', v: 'c', st: 130, sb: 150 },
-  band:      { align: 'c', v: 'c', st: 130, sb: 150 },
-  circle:    { align: 'c', v: 'c', st: 130, sb: 150 },
-  card:      { align: 'c', v: 'c', st: 140, sb: 160 },
-  numeral:   { align: 's', v: 'b', st: 130, sb: 150 },
-  header:    { align: 'c', v: 'c', st: 230, sb: 150 },
-  diagonal:  { align: 's', v: 'c', st: 130, sb: 150 }
+  editorial: { align: 's', edge: 140, w: 800, st: 150, sb: 150 },
+  panel:     { align: 's', edge: 110, w: 590, st: 150, sb: 150, imgW: 560, cx: (rtl) => (rtl ? 675 : 405) },
+  minimal:   { align: 'c', w: 840, st: 150, sb: 150 },
+  corners:   { align: 'c', w: 760, st: 170, sb: 170 },
+  ripple:    { align: 'c', w: 820, st: 150, sb: 150 },
+  band:      { align: 's', edge: 120, w: 820, st: 150, sb: 150 },
+  grid:      { align: 's', edge: 135, w: 790, st: 150, sb: 150, marker: 'box' },
+  rounded:   { align: 'c', w: 820, st: 150, sb: 150, marker: 'pill' }
 };
+
+// لوحات جاهزة تُستخدم عند زر «تصميم آخر»: bg للشريحتين الأولى والأخيرة، alt للوسطيتين
+const PALETTES = [
+  { bg: '#F3EFE6', alt: '#0F3D30', accent: '#B08D4A' },
+  { bg: '#0B1B33', alt: '#F2EBDD', accent: '#CDB27A' },
+  { bg: '#1F2423', alt: '#EAF0EC', accent: '#8FB39F' },
+  { bg: '#FAFAF8', alt: '#111111', accent: '#B4693D' },
+  { bg: '#4A1626', alt: '#F7E4E0', accent: '#D9A5A0' },
+  { bg: '#E8E2D6', alt: '#2C3E50', accent: '#C28E5C' },
+  { bg: '#2B1D14', alt: '#F1E4D0', accent: '#C98B4B' },
+  { bg: '#FFF4D6', alt: '#2F6FED', accent: '#FF8FAB' },
+  { bg: '#12263A', alt: '#F1F4F8', accent: '#14B8C6' },
+  { bg: '#1F3B33', alt: '#F1EEE6', accent: '#D8BA7C' }
+];
 
 /* ============================================================
-   8) ضبط الألوان القادمة من الذكاء الاصطناعي
+   8) ضبط الألوان: تباين مريح مع حرية أكبر في الاختيار
    ============================================================ */
 const HEX = /^#[0-9a-fA-F]{6}$/;
+const rgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+const toHex = (a) => '#' + a.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const mix = (a, b, t) => { const x = rgb(a), y = rgb(b); return toHex(x.map((v, i) => v + (y[i] - v) * t)); };
+const lum = (h) => {
+  const c = rgb(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
-function hexToHsl(h) {
-  const n = parseInt(h.slice(1), 16);
-  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
-  let H = 0, S = 0;
-  const L = (mx + mn) / 2;
-  if (d) {
-    S = d / (1 - Math.abs(2 * L - 1));
-    if (mx === r) H = ((g - b) / d) % 6;
-    else if (mx === g) H = (b - r) / d + 2;
-    else H = (r - g) / d + 4;
-    H *= 60;
-    if (H < 0) H += 360;
-  }
-  return [H, S, L];
+function textOn(bg) {
+  const light = mix(bg, '#ffffff', 0.93), dark = mix(bg, '#000000', 0.9);
+  return contrast(bg, light) >= contrast(bg, dark) ? light : dark;
+}
+function fitBg(bg) {
+  let c = bg;
+  for (let k = 0; k < 8 && contrast(c, textOn(c)) < 4.5; k++) c = mix(c, '#000000', 0.1);
+  return c;
+}
+function fixAccent(acc, bg) {
+  const target = lum(bg) < 0.4 ? '#ffffff' : '#000000';
+  let a = acc;
+  for (let k = 0; k < 12 && contrast(a, bg) < 3; k++) a = mix(a, target, 0.12);
+  return a;
+}
+function normPalette(p) {
+  if (!p || !HEX.test(p.bg || '')) return null;
+  const bg = fitBg(p.bg);
+  let alt = HEX.test(p.alt || '') ? fitBg(p.alt) : null;
+  if (!alt || contrast(bg, alt) < 1.8) alt = lum(bg) < 0.4 ? mix(bg, '#ffffff', 0.92) : mix(bg, '#000000', 0.86);
+  return { bg, alt, accent: HEX.test(p.accent || '') ? p.accent : '#B08D4A' };
+}
+function slideTheme(pal, i, rhythm) {
+  const bg = rhythm === 'alternate' && (i === 1 || i === 2) ? pal.alt : pal.bg;
+  const text = textOn(bg);
+  return { bg, text, accent: fixAccent(pal.accent, bg), soft: mix(bg, text, 0.09) };
 }
 
-function hsl(H, S, L) {
-  const c = (1 - Math.abs(2 * L - 1)) * S, x = c * (1 - Math.abs(((H / 60) % 2) - 1)), m = L - c / 2;
-  let r = 0, g = 0, b = 0;
-  if (H < 60) [r, g, b] = [c, x, 0];
-  else if (H < 120) [r, g, b] = [x, c, 0];
-  else if (H < 180) [r, g, b] = [0, c, x];
-  else if (H < 240) [r, g, b] = [0, x, c];
-  else if (H < 300) [r, g, b] = [x, 0, c];
-  else [r, g, b] = [c, 0, x];
-  const f = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
-  return '#' + f(r) + f(g) + f(b);
-}
-
-const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
-
-function harmonize(p) {
-  if (!p || !HEX.test(p.bg) || !HEX.test(p.accent)) return null;
-  const [bh, bs0, bl0] = hexToHsl(p.bg);
-  const dark = bl0 < 0.5, bs = Math.min(bs0, 0.32);
-  const bl = dark ? clamp(bl0, 0.12, 0.25) : clamp(bl0, 0.88, 0.95);
-  const [ah, as0, al0] = hexToHsl(p.accent);
+function resolveDesign(data) {
+  const o = state.over || {};
+  const ok = (v, list, d) => (list.includes(v) ? v : d);
   return {
-    bg: hsl(bh, bs, bl),
-    bg2: hsl(bh, bs, dark ? bl - 0.04 : bl - 0.05),
-    text: dark ? hsl(bh, 0.15, 0.94) : hsl(bh, 0.25, 0.14),
-    accent: hsl(ah, Math.min(as0, 0.5), dark ? clamp(al0, 0.6, 0.75) : clamp(al0, 0.25, 0.4))
+    pal: normPalette(o.palette) || normPalette(data.palette) || normPalette(PALETTES[0]),
+    layout: ok(o.layout || data.layout, LAYOUT_NAMES, 'minimal'),
+    font: ok(o.font || data.font, FONTKEYS, 'a'),
+    shape: ok(o.shape || data.imageShape, SHAPES, 'rounded'),
+    rhythm: (o.rhythm || data.rhythm) === 'uniform' ? 'uniform' : 'alternate',
+    imgPos: data.imagePosition === 'bottom' ? 'bottom' : 'top'
   };
 }
 
-function pickTheme(data) {
-  return harmonize(data && data.palette) || THEMES[data && data.theme] || THEMES.ivory;
+function readLast() {
+  try { return JSON.parse(localStorage.getItem('carousel-last') || 'null'); } catch (e) { return null; }
+}
+function saveLast() {
+  const d = state.design;
+  if (!d) return;
+  try { localStorage.setItem('carousel-last', JSON.stringify({ layout: d.layout, font: d.font, shape: d.shape })); } catch (e) {}
+}
+
+// زر «تصميم آخر»: يعيد رسم النص نفسه بهوية مختلفة دون استدعاء الذكاء الاصطناعي
+async function restyle() {
+  if (!state.last) return;
+  const cur = state.design || {};
+  const other = (list, c) => { const p = list.filter((v) => v !== c); return p[Math.floor(Math.random() * p.length)]; };
+  state.over = {
+    layout: other(LAYOUT_NAMES, cur.layout),
+    font: other(FONTKEYS, cur.font),
+    shape: other(SHAPES, cur.shape),
+    rhythm: Math.random() < 0.7 ? 'alternate' : 'uniform',
+    palette: Math.random() < 0.65 ? PALETTES[Math.floor(Math.random() * PALETTES.length)] : null
+  };
+  await ensureFonts(state.last.lang, state.over.font);
+  render();
 }
 
 /* ============================================================
@@ -813,9 +861,8 @@ function render() {
   if (!state.last) return;
   const { data, lang } = state.last;
   const d = dict();
-  const theme = pickTheme(data);
-  const layout = LAYOUTS[data.layout] ? data.layout : 'frame';
-  const imgPos = data.imagePosition === 'bottom' ? 'bottom' : 'top';
+  const D = resolveDesign(data);
+  state.design = D;
   const slides = data.slides.slice(0, 4);
 
   els.slides.innerHTML = '';
@@ -826,7 +873,7 @@ function render() {
     canvas.height = SIZE;
     canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-label', d.slideAlt + ' ' + (i + 1));
-    drawSlide(canvas.getContext('2d'), slide, i, slides.length, theme, layout, imgPos, lang);
+    drawSlide(canvas.getContext('2d'), slide, i, slides.length, D, lang);
 
     const card = document.createElement('article');
     card.className = 'slide-card';
@@ -862,39 +909,41 @@ function render() {
   els.note.textContent = d.noteSwitch;
 }
 
-function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
+function drawSlide(ctx, slide, i, count, D, lang) {
+  const layoutName = D.layout;
   const L = LAYOUTS[layoutName];
   const RTL = lang === 'ar';
-  const FONT = CANVAS_FONT[lang];
+  const FONT = fontStack(lang, D.font);
+  const t = slideTheme(D.pal, i, D.rhythm);
 
-  const g = ctx.createLinearGradient(0, 0, 0, SIZE);
-  g.addColorStop(0, t.bg);
-  g.addColorStop(1, t.bg2);
-  ctx.fillStyle = g;
+  ctx.fillStyle = t.bg;
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  decorate(ctx, t, layoutName, i);
+  const hasImg = !!state.img && (i === 0 || i === count - 1);
+  decorate(ctx, t, layoutName, i, RTL, hasImg);
 
-  // الصورة: الشريحة الأولى والأخيرة
-  const hasImg = state.img && (i === 0 || i === count - 1);
-  let top = L.st, bottom = SIZE - L.sb;
+  const E = L.edge || 150;
+  const cx = L.cx ? L.cx(RTL) : SIZE / 2;
+  const st = layoutName === 'ripple' && !hasImg ? 400 : L.st;
+  let top = st, bottom = SIZE - L.sb;
+
   if (hasImg) {
-    const maxW = 780, maxH = 390, pad = 24;
-    const r = Math.min(maxW / state.img.width, maxH / state.img.height);
-    const iw = state.img.width * r, ih = state.img.height * r;
-    const cw = iw + pad * 2, ch = ih + pad * 2;
-    const cx0 = (SIZE - cw) / 2;
-    const cy0 = imgPos === 'top' ? L.st - 20 : SIZE - L.sb + 10 - ch;
-    drawImageCard(ctx, state.img, cx0, cy0, cw, ch, pad, t);
-    if (imgPos === 'top') top = cy0 + ch + 30;
-    else { top = L.st - 10; bottom = cy0 - 30; }
+    const dm = imgDims(state.img, D.shape, L.imgW || 780);
+    const y0 = D.imgPos === 'top' ? st - 20 : SIZE - L.sb + 10 - dm.h;
+    drawImg(ctx, state.img, cx - dm.w / 2, y0, dm.w, dm.h, D.shape, t);
+    if (D.imgPos === 'top') top = y0 + dm.h + 30;
+    else { top = st - 10; bottom = y0 - 30; }
   }
 
   const isList = i === 2;
   const side = L.align === 's' || isList;
-  const edge = RTL ? SIZE - 150 : 150;
-  const maxW = side ? SIZE - 340 : SIZE - 240;
-  const listIndent = 50;
+  const edge = RTL ? SIZE - E : E;
+  const maxW = side ? (L.align === 's' ? L.w : SIZE - 2 * E - 40) : L.w;
+  const marker = L.marker || 'dot';
+  const pill = isList && marker === 'pill';
+  const pad = pill ? 26 : 0;
+  const indent = 50;
+  const itemW = maxW - indent - pad * 2;
 
   const title = String(slide.title || '');
   const raw = String(slide.body || '');
@@ -909,12 +958,12 @@ function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
     tl = wrap(ctx, title, maxW);
     ctx.font = '400 ' + bS + 'px ' + FONT;
     items = isList
-      ? raw.split('\n').map((l) => l.replace(/^[-•✓*\s]+/, '').trim()).filter(Boolean).map((l) => wrap(ctx, l, maxW - listIndent))
+      ? raw.split('\n').map((l) => l.replace(/^[-•✓*\s]+/, '').trim()).filter(Boolean).map((l) => wrap(ctx, l, itemW))
       : [wrap(ctx, raw, maxW)];
 
     const tLH = tS * (RTL ? 1.34 : 1.18);
     const bLH = bS * (RTL ? 1.62 : 1.55);
-    const gap = isList ? 22 : 0;
+    const gap = isList ? (pill ? 40 : 22) : 0;
     const bodyH = items.reduce((sum, lines) => sum + lines.length * bLH, 0) + gap * Math.max(0, items.length - 1);
     total = tl.length * tLH + 44 + bodyH;
     return { tLH, bLH, gap };
@@ -930,13 +979,13 @@ function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
   }
 
   const free = Math.max(0, avail - total);
-  let y = top + (L.v === 'b' ? free : free / 2) + tS;
+  let y = top + free / 2 + tS;
   const startY = y;
 
   ctx.direction = RTL ? 'rtl' : 'ltr';
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = side ? (RTL ? 'right' : 'left') : 'center';
-  const tx = side ? edge : SIZE / 2;
+  const tx = side ? edge : cx;
 
   // العنوان
   ctx.fillStyle = t.text;
@@ -944,36 +993,46 @@ function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
   tl.forEach((line) => { ctx.fillText(line, tx, y); y += m.tLH; });
   const lastBase = y - m.tLH;
 
-  // خط تمييز تحت العنوان في التخطيطات الوسطية
-  if (!side) {
+  // خط تمييز رفيع تحت العنوان
+  if (!isList) {
     ctx.fillStyle = t.accent;
-    ctx.fillRect(SIZE / 2 - 45, lastBase + 26, 90, 6);
+    const rx = side ? (RTL ? edge - 90 : edge) : tx - 45;
+    ctx.fillRect(rx, lastBase + 26, 90, 6);
   }
 
   // النص
   y = lastBase + 44 + bS;
   ctx.font = '400 ' + bS + 'px ' + FONT;
   items.forEach((lines) => {
-    if (isList) {
-      ctx.fillStyle = t.accent;
-      ctx.beginPath();
-      ctx.arc(RTL ? edge - 14 : edge + 14, y - bS * 0.3, 9, 0, Math.PI * 2);
+    const rowH = lines.length * m.bLH;
+    if (pill) {
+      ctx.fillStyle = t.soft;
+      const ph = rowH + 8;
+      roundRect(ctx, RTL ? edge - maxW : edge, y - bS - 12, maxW, ph, Math.min(28, ph / 2));
       ctx.fill();
+    }
+    if (isList) {
+      const mx = RTL ? edge - 14 - pad : edge + 14 + pad;
+      const my = y - bS * 0.3;
+      ctx.fillStyle = t.accent;
+      ctx.strokeStyle = t.accent;
+      if (marker === 'box') { ctx.lineWidth = 4; ctx.strokeRect(mx - 11, my - 11, 22, 22); }
+      else { ctx.beginPath(); ctx.arc(mx, my, 9, 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.fillStyle = t.text;
     ctx.globalAlpha = 0.92;
-    const lineX = isList ? (RTL ? edge - listIndent : edge + listIndent) : tx;
+    const lineX = isList ? (RTL ? edge - indent - pad : edge + indent + pad) : tx;
     lines.forEach((line) => { ctx.fillText(line, lineX, y); y += m.bLH; });
     ctx.globalAlpha = 1;
     y += m.gap;
   });
 
-  // خط رأسي بلون التمييز للتخطيطات الجانبية وقائمة الفوائد
-  if (side && (layoutName === 'editorial' || isList)) {
+  // خط رأسي بلون التمييز
+  if (side && (layoutName === 'editorial' || (isList && marker === 'dot'))) {
     const barTop = startY - tS * 0.82;
     const barH = Math.max(60, (y - m.gap - bS * 0.35) - barTop);
     ctx.fillStyle = t.accent;
-    ctx.fillRect(RTL ? SIZE - 108 : 100, barTop, 6, barH);
+    ctx.fillRect(RTL ? edge + 42 : edge - 50, barTop, 6, barH);
   }
 
   // مؤشر الشرائح
@@ -981,7 +1040,7 @@ function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
   ctx.direction = 'ltr';
   for (let k = 0; k < dots; k++) {
     ctx.beginPath();
-    ctx.arc(SIZE / 2 + (k - (dots - 1) / 2) * 34, SIZE - 86, 8, 0, Math.PI * 2);
+    ctx.arc(cx + (k - (dots - 1) / 2) * 34, SIZE - 86, 8, 0, Math.PI * 2);
     ctx.fillStyle = t.accent;
     ctx.globalAlpha = k === i ? 1 : 0.3;
     ctx.fill();
@@ -989,65 +1048,104 @@ function drawSlide(ctx, slide, i, count, t, layoutName, imgPos, lang) {
   ctx.globalAlpha = 1;
 }
 
-function decorate(ctx, t, name, i) {
+function decorate(ctx, t, name, i, RTL, hasImg) {
   ctx.save();
   ctx.fillStyle = t.accent;
   ctx.strokeStyle = t.accent;
 
-  if (name === 'band') {
-    ctx.fillRect(0, 0, 36, SIZE);
-  } else if (name === 'circle') {
-    ctx.globalAlpha = 0.1;
-    ctx.beginPath(); ctx.arc(SIZE / 2, SIZE / 2, 430, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.35; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(SIZE / 2, SIZE / 2, 430, 0, Math.PI * 2); ctx.stroke();
-  } else if (name === 'card') {
-    ctx.fillRect(0, 0, SIZE, SIZE);
-    const g = ctx.createLinearGradient(0, 0, 0, SIZE);
-    g.addColorStop(0, t.bg); g.addColorStop(1, t.bg2);
-    ctx.fillStyle = g;
-    roundRect(ctx, 56, 56, SIZE - 112, SIZE - 112, 36);
-    ctx.fill();
-  } else if (name === 'numeral') {
-    ctx.globalAlpha = 0.1;
-    ctx.font = '800 560px ' + CANVAS_FONT.en;
-    ctx.direction = 'ltr';
-    ctx.textAlign = 'left';
-    ctx.fillText(String(i + 1), 60, 560);
-  } else if (name === 'header') {
-    ctx.fillRect(0, 0, SIZE, 150);
-  } else if (name === 'diagonal') {
-    ctx.globalAlpha = 0.12;
-    ctx.beginPath();
-    ctx.moveTo(0, 720); ctx.lineTo(SIZE, 220); ctx.lineTo(SIZE, 400); ctx.lineTo(0, 900);
-    ctx.closePath(); ctx.fill();
-  } else if (name !== 'editorial') { // frame
-    ctx.globalAlpha = 0.45; ctx.lineWidth = 2;
-    ctx.strokeRect(48, 48, SIZE - 96, SIZE - 96);
+  if (name === 'editorial') {
+    ctx.globalAlpha = 0.6; ctx.lineWidth = 2;
+    ctx.strokeRect(64, 64, SIZE - 128, SIZE - 128);
+  } else if (name === 'panel') {
+    const w = 300, x = RTL ? 0 : SIZE - w;
+    ctx.fillStyle = t.soft;
+    ctx.fillRect(x, 0, w, SIZE);
+    ctx.fillStyle = t.accent;
+    ctx.fillRect(RTL ? w - 4 : x, 0, 4, SIZE);
+    ctx.globalAlpha = 0.9;
+    ctx.textAlign = 'center'; ctx.direction = 'ltr'; ctx.textBaseline = 'alphabetic';
+    ctx.font = "800 190px 'Inter', Arial, sans-serif";
+    ctx.fillText(String(i + 1).padStart(2, '0'), x + w / 2, SIZE / 2 + 66);
+  } else if (name === 'corners') {
+    ctx.globalAlpha = 0.75; ctx.lineWidth = 4;
+    const a = 70, b = SIZE - 70, l = 90;
+    [[a, a, 1, 1], [b, a, -1, 1], [a, b, 1, -1], [b, b, -1, -1]].forEach(([x, y, sx, sy]) => {
+      ctx.beginPath(); ctx.moveTo(x, y + sy * l); ctx.lineTo(x, y); ctx.lineTo(x + sx * l, y); ctx.stroke();
+    });
+  } else if (name === 'ripple') {
+    ctx.lineWidth = 3;
+    if (!hasImg) {
+      ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(SIZE / 2, 230, 140, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(SIZE / 2, 230, 92, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(SIZE / 2, 230, 44, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 0.5; ctx.lineWidth = 2;
+    ctx.strokeRect(56, 56, SIZE - 112, SIZE - 112);
+  } else if (name === 'band') {
+    ctx.fillRect(RTL ? SIZE - 36 : 0, 0, 36, SIZE);
+  } else if (name === 'grid') {
+    ctx.globalAlpha = 0.1; ctx.strokeStyle = t.text; ctx.lineWidth = 2;
+    for (let k = 1; k < 8; k++) {
+      ctx.beginPath(); ctx.moveTo(k * 135, 0); ctx.lineTo(k * 135, SIZE); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, k * 135); ctx.lineTo(SIZE, k * 135); ctx.stroke();
+    }
+    ctx.globalAlpha = 1; ctx.fillStyle = t.accent;
+    roundRect(ctx, 80, 80, 44, 44, 10); ctx.fill();
+  } else if (name === 'rounded') {
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath(); ctx.arc(SIZE - 110, 110, 230, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(90, SIZE - 80, 170, 0, Math.PI * 2); ctx.fill();
+  } else if (name === 'minimal') {
+    ctx.globalAlpha = 0.8; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(96, 96, 24, 0, Math.PI * 2); ctx.stroke();
   }
 
   ctx.restore();
 }
 
-function drawImageCard(ctx, img, x, y, w, h, pad, c) {
-  ctx.save();
-  roundRect(ctx, x, y, w, h, 28);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.restore();
+// أبعاد الصورة حسب شكل الإطار
+function imgDims(img, shape, maxW) {
+  const maxH = 390;
+  if (shape === 'arch') return { w: Math.min(maxW, 300), h: maxH };
+  if (shape === 'circle') { const s = Math.min(maxW, maxH); return { w: s, h: s }; }
+  const r = Math.min(maxW / img.width, maxH / img.height);
+  return { w: img.width * r, h: img.height * r };
+}
 
+function imgPath(ctx, x, y, w, h, shape) {
+  if (shape === 'arch') {
+    ctx.beginPath();
+    ctx.moveTo(x, y + h); ctx.lineTo(x, y + w / 2);
+    ctx.arc(x + w / 2, y + w / 2, w / 2, Math.PI, 0);
+    ctx.lineTo(x + w, y + h); ctx.closePath();
+  } else if (shape === 'circle') {
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, w / 2, 0, Math.PI * 2);
+  } else {
+    roundRect(ctx, x, y, w, h, shape === 'plain' ? 18 : 26);
+  }
+}
+
+function drawImg(ctx, img, x, y, w, h, shape, t) {
   ctx.save();
-  roundRect(ctx, x + pad / 2, y + pad / 2, w - pad, h - pad, 18);
+  imgPath(ctx, x, y, w, h, shape);
   ctx.clip();
-  ctx.drawImage(img, x + pad, y + pad, w - pad * 2, h - pad * 2);
+  if (shape === 'arch' || shape === 'circle') {
+    const r = Math.max(w / img.width, h / img.height);
+    const dw = img.width * r, dh = img.height * r;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  } else {
+    ctx.drawImage(img, x, y, w, h);
+  }
   ctx.restore();
 
-  ctx.save();
-  ctx.strokeStyle = c.accent;
-  ctx.lineWidth = 3;
-  roundRect(ctx, x, y, w, h, 28);
-  ctx.stroke();
-  ctx.restore();
+  if (shape !== 'plain') {
+    ctx.save();
+    ctx.strokeStyle = t.accent;
+    ctx.lineWidth = 4;
+    imgPath(ctx, x, y, w, h, shape);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -1111,6 +1209,8 @@ document.querySelectorAll('.seg-btn').forEach((btn) => {
 els.themeBtn.addEventListener('click', () => {
   applyTheme(state.theme === 'dark' ? 'light' : 'dark');
 });
+
+els.restyle.addEventListener('click', restyle);
 
 applyLang(state.lang, { save: false });
 applyTheme(state.theme, { save: false });
