@@ -1,31 +1,98 @@
 // src/worker.js
 // Cloudflare Worker: يخدم الصفحة من مجلد public، ويشغّل /api/generate بمفتاح مخفي.
 
-const LAYOUT_NAMES = ["frame", "editorial", "band", "circle", "card", "numeral", "header", "diagonal"];
+const LAYOUT_NAMES = ["editorial", "panel", "minimal", "corners", "ripple", "band", "grid", "rounded"];
+const SHAPE_NAMES = ["rounded", "arch", "circle", "plain"];
+const FONT_KEYS = ["a", "b", "c"];
+const RHYTHMS = ["alternate", "alternate", "uniform"];
 
-/* قواعد التصميم مشتركة بين اللغتين */
+/* عائلات ألوان مقترحة، تُسحب عشوائيًا لكسر التكرار */
+const HUES = {
+  ar: ["أخضر زمردي عميق", "كحلي ليلي", "عنابي داكن", "رملي دافئ", "فحمي مع مريمية", "أزرق فولاذي", "بني ترابي", "أزرق سماوي هادئ", "بنفسجي داكن", "أخضر غابي مع ذهبي", "وردي باهت مع بني", "أبيض ناصع مع نحاسي"],
+  en: ["deep emerald", "midnight navy", "dark burgundy", "warm sand", "charcoal with sage", "steel blue", "earthy brown", "calm sky blue", "deep violet", "forest green with gold", "blush pink with brown", "crisp white with copper"],
+};
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+function pick(list, avoid) {
+  const pool = list.filter((v) => v !== avoid);
+  const src = pool.length ? pool : list;
+  return src[Math.floor(Math.random() * src.length)];
+}
+
+/* قواعد التصميم */
 const DESIGN_RULES = `
-قواعد التصميم: ابتكر تصميمًا يناسب هذا المنتج بالذات.
-- palette: لونان فقط بصيغة #RRGGBB. bg لون الخلفية (فاتح مثل كريمي أو رملي أو وردي ناعم أو أخضر باهت، أو غامق مثل كحلي أو أخضر غابي أو عنابي أو فحمي). accent لون التمييز المنسجم مع الخلفية والمعبّر عن روح المنتج. اختر ألوانًا هادئة ومريحة للعين، وممنوع الفاقعة. والكود يضبط التباين تلقائيًا.
-- layout: شكل التصميم الهندسي، اختر واحدًا فقط:
-  frame: إطار رفيع ونص في الوسط (كلاسيكي هادئ)
-  editorial: نص جانبي مع خط عمودي (أنيق ومجلاتي)
-  band: شريط ملوّن على الحافة ونص في الوسط (بسيط عصري)
-  circle: دائرة ناعمة خلف النص (ودود وحيوي)
-  card: بطاقة داخل إطار ملوّن عريض (حديث وجريء)
-  numeral: رقم الشريحة كبير باهت ونص جانبي في الأسفل (جريء)
-  header: شريط علوي ملوّن ونص في الوسط (رسمي ومرتب)
-  diagonal: شريط مائل ناعم ونص جانبي (شبابي وحركي)
-- يوجد في رسالة المستخدم تخطيط مقترح لهذه المرة، التزم به إلا إذا كان غير مناسب إطلاقًا للمنتج.
-- imagePosition: "top" أو "bottom" فقط.
+قواعد التصميم: صمّم هوية بصرية احترافية تناسب هذا المنتج بالذات، ولا تكرر تصميمًا نمطيًا.
+- palette: ثلاثة ألوان بصيغة #RRGGBB.
+  bg: لون الخلفية الأساسي للشريحتين الأولى والأخيرة.
+  alt: لون الخلفية البديل للشريحتين الوسطيتين، ويجب أن يختلف في الدرجة عن bg (فاتح مقابل غامق).
+  accent: لون تمييز منسجم يعبّر عن المنتج (ذهبي، نحاسي، مريمي، وردي...).
+  اختر ألوانًا احترافية متناسقة تناسب مجال المنتج: العطور والمجوهرات ألوان داكنة مع لمسة معدنية، منتجات الأطفال ألوان مرحة صافية، التقنية ألوان باردة هادئة، القهوة والمطاعم ألوان ترابية دافئة، العناية والتجميل ألوان ناعمة. تجنب ألوان النيون. والكود يضبط التباين تلقائيًا.
+- layout: واحد فقط من:
+  editorial: إطار رفيع ونص جانبي (أنيق ومجلاتي)
+  panel: لوحة جانبية برقم الشريحة (رسمي ومرتب)
+  minimal: بسيط في الوسط (نقي وحديث)
+  corners: زوايا مزخرفة ونص في الوسط (كلاسيكي فاخر)
+  ripple: حلقات متداخلة فوق النص (هادئ ودافئ)
+  band: شريط ملوّن على الحافة (عصري)
+  grid: شبكة خطوط دقيقة (تقني)
+  rounded: دوائر ناعمة وقوائم بكبسولات (مرح وودود)
+- font: "a" عصري، "b" كلاسيكي أنيق، "c" هندسي.
+- rhythm: "alternate" تتناوب الخلفيتان بين الشرائح، أو "uniform" خلفية واحدة.
+- imageShape: "rounded" أو "arch" أو "circle" أو "plain".
+- imagePosition: "top" أو "bottom".
+- في رسالة المستخدم قيم مقترحة لهذه المرة (تخطيط وخط وشكل صورة وتناوب وعائلة ألوان). التزم بها إلا إذا كانت غير مناسبة إطلاقًا للمنتج.
 `;
 
 const SCHEMA = `
 ارجع JSON فقط، بدون أي كلام قبله أو بعده، وبهذا الشكل:
 {
-  "palette": { "bg": "#RRGGBB", "accent": "#RRGGBB" },
-  "layout": "frame",
-  "imagePosition": "top" أو "bottom",
+  "palette": { "bg": "#RRGGBB", "alt": "#RRGGBB", "accent": "#RRGGBB" },
+  "layout": "minimal",
+  "font": "a",
+  "rhythm": "alternate",
+  "imageShape": "rounded",
+  "imagePosition": "top",
+  "slides": [
+    { "title": "...", "body": "..." },
+    { "title": "...", "body": "..." },
+    { "title": "...", "body": "..." },
+    { "title": "...", "body": "..." }
+  ]
+}`;
+
+const DESIGN_RULES_EN = `
+Design rules: build a professional visual identity that fits this specific product. Never fall back to a generic look.
+- palette: three colors as #RRGGBB.
+  bg: main background for slides 1 and 4.
+  alt: alternate background for slides 2 and 3; it must differ in tone from bg (light vs dark).
+  accent: a highlight color that suits the product (gold, copper, sage, blush...).
+  Choose refined, harmonious colors for the product's field: perfume and jewelry = dark tones with a metallic touch; kids' products = clear cheerful colors; tech = calm cool colors; coffee and food = warm earthy colors; beauty and care = soft tones. No neon. The code fixes contrast automatically.
+- layout: pick exactly one:
+  editorial: thin frame, side text (elegant, magazine-like)
+  panel: side panel with the slide number (formal, tidy)
+  minimal: clean and centered (pure, modern)
+  corners: ornamental corners, centered text (classic luxury)
+  ripple: concentric rings above the text (calm, warm)
+  band: colored edge band (modern)
+  grid: fine grid lines (technical)
+  rounded: soft circles and pill-shaped lists (playful, friendly)
+- font: "a" modern, "b" classic elegant, "c" geometric.
+- rhythm: "alternate" (the two backgrounds alternate across slides) or "uniform" (one background).
+- imageShape: "rounded", "arch", "circle" or "plain".
+- imagePosition: "top" or "bottom".
+- The user message includes suggested values for this run (layout, font, image shape, rhythm, color family). Follow them unless they truly do not fit the product.
+`;
+
+const SCHEMA_EN = `
+Return JSON only, with no text before or after it, in exactly this shape:
+{
+  "palette": { "bg": "#RRGGBB", "alt": "#RRGGBB", "accent": "#RRGGBB" },
+  "layout": "minimal",
+  "font": "a",
+  "rhythm": "alternate",
+  "imageShape": "rounded",
+  "imagePosition": "top",
   "slides": [
     { "title": "...", "body": "..." },
     { "title": "...", "body": "..." },
@@ -69,32 +136,7 @@ Slide 2 (problem & solution): short title. Two sentences: a moment the customer 
 Slide 3 (benefits): short title. Three benefits, each on its own line (separate with \\n), max 6 words each, starting with an action or an outcome the customer gets — not a dry spec.
 Slide 4 (call to action): a clear verb title like "Order today". One line that mentions price or offer only if the user provided it, and ends with how to order (e.g. "Message us on WhatsApp"). Never fake urgency.
 
-Design rules: invent a look that fits this product.
-- palette: exactly two colors as #RRGGBB. bg is the background — light (cream, sand, soft pink, pale green) or dark (navy, forest, maroon, charcoal). accent is the highlight color that matches the background and the product's mood. Calm, easy on the eyes, never neon. The code fixes contrast automatically.
-- layout: pick exactly one:
-  frame: thin frame, centered text (quiet classic)
-  editorial: side text with a vertical rule (magazine-like)
-  band: colored edge band, centered text (clean modern)
-  circle: soft circle behind the text (friendly)
-  card: content inside a thick colored border (bold modern)
-  numeral: oversized faded slide number, side text at the bottom (bold)
-  header: colored top bar, centered text (formal, tidy)
-  diagonal: soft diagonal band, side text (youthful)
-- The user message includes a suggested layout for this run; follow it unless it truly does not fit the product.
-- imagePosition: "top" or "bottom" only.
-
-Return JSON only, with no text before or after it, in exactly this shape:
-{
-  "palette": { "bg": "#RRGGBB", "accent": "#RRGGBB" },
-  "layout": "frame",
-  "imagePosition": "top",
-  "slides": [
-    { "title": "...", "body": "..." },
-    { "title": "...", "body": "..." },
-    { "title": "...", "body": "..." },
-    { "title": "...", "body": "..." }
-  ]
-}`;
+${DESIGN_RULES_EN}${SCHEMA_EN}`;
 
 const SYSTEM_PROMPTS = { ar: SYSTEM_PROMPT_AR, en: SYSTEM_PROMPT_EN };
 
@@ -147,15 +189,20 @@ async function handleGenerate(request, env) {
   if (!description) return reply(lang, "empty_description", 400);
   if (!env.GROQ_API_KEY) return reply(lang, "no_key", 500);
 
-  const layout = LAYOUT_NAMES[Math.floor(Math.random() * LAYOUT_NAMES.length)];
+  const avoid = body.avoid && typeof body.avoid === "object" ? body.avoid : {};
+  const layout = pick(LAYOUT_NAMES, avoid.layout);
+  const font = pick(FONT_KEYS, avoid.font);
+  const shape = pick(SHAPE_NAMES, avoid.shape);
+  const rhythm = RHYTHMS[Math.floor(Math.random() * RHYTHMS.length)];
+  const hue = HUES[lang][Math.floor(Math.random() * HUES[lang].length)];
 
   const userMessage = lang === "ar"
     ? `طلب المستخدم (فيه المنتج وتفاصيله وربما السعر أو العرض أو الأسلوب): ${description}\n` +
       `لغة المحتوى المطلوبة: العربية الفصحى الحديثة.\n` +
-      `التخطيط المقترح لهذه المرة: ${layout}`
+      `التصميم المقترح لهذه المرة: التخطيط ${layout}، الخط ${font}، شكل الصورة ${shape}، التناوب ${rhythm}، وعائلة الألوان المفضلة: ${hue}.`
     : `User request (product, details, and possibly price, offer or tone): ${description}\n` +
       `Required content language: English.\n` +
-      `Suggested layout for this run: ${layout}`;
+      `Suggested design for this run: layout ${layout}, font ${font}, image shape ${shape}, rhythm ${rhythm}, preferred color family: ${hue}.`;
 
   try {
     const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -202,9 +249,16 @@ async function handleGenerate(request, env) {
     }
 
     // نعيد حقولًا منظّمة فقط، حتى لا يعتمد الواجه على شكل رد غير متوقع
+    const pal = parsed.palette && typeof parsed.palette === "object" ? parsed.palette : {};
+    const palette = {};
+    ["bg", "alt", "accent"].forEach((k) => { if (HEX.test(String(pal[k] || ""))) palette[k] = pal[k]; });
+
     const payload = {
-      palette: parsed.palette && typeof parsed.palette === "object" ? parsed.palette : null,
+      palette: palette.bg ? palette : null,
       layout: LAYOUT_NAMES.includes(parsed.layout) ? parsed.layout : layout,
+      font: FONT_KEYS.includes(parsed.font) ? parsed.font : font,
+      rhythm: parsed.rhythm === "uniform" ? "uniform" : "alternate",
+      imageShape: SHAPE_NAMES.includes(parsed.imageShape) ? parsed.imageShape : shape,
       imagePosition: parsed.imagePosition === "bottom" ? "bottom" : "top",
       lang,
       slides: parsed.slides.slice(0, 4).map((s) => ({
